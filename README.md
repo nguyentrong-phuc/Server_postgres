@@ -8,7 +8,9 @@ http://localhost:4000/api/tasks → danh sách task.
 http://localhost:4000/api/typeofworks → danh sách typeofWorks.
 
 ===========================================================================
+
 *Lưu ý: tránh dùng port 3000 trùng với backend server presign URL của MinIO
+
 ===========================================================================
 
 Lỗi: 
