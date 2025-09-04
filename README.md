@@ -7,23 +7,23 @@ http://localhost:4000/api/tasks → danh sách task.
 
 http://localhost:4000/api/typeofworks → danh sách typeofWorks.
 
-===========================================================================
+=======================================================================================================
 
-*Lưu ý: tránh dùng port 3000 trùng với backend server presign URL của MinIO
+## Lưu ý: tránh dùng port 3000 trùng với backend server presign URL của MinIO
 
-===========================================================================
+=======================================================================================================
 
 ### Lỗi: 
             [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///.../server.js is not specified and it doesn't parse as CommonJS.
             Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
             To eliminate this warning, add "type": "module" to C:\Users\admin\my-backend\package.json.
 
-##Nguyên nhân: 
+### Nguyên nhân: 
             Bạn đang viết code bằng ESM (ES Module) (import express from "express";), nhưng package.json của project chưa khai báo "type": "module".
 
             Node.js vì vậy phải tự động detect → chạy được nhưng cảnh báo hiệu năng.
 
-##Fix: 
+### Fix: 
             {
             "name": "my-backend",
             "version": "1.0.0",
@@ -37,33 +37,33 @@ http://localhost:4000/api/typeofworks → danh sách typeofWorks.
             }
 
 
-===========================================================================
+=======================================================================================================
 
 
-Lỗi:        
+### Lỗi:        
             Cannot GET /
 
-Nguyên nhân: 
+### Nguyên nhân: 
             Backend của bạn chưa định nghĩa route gốc /
 
-Fix: 
+### Fix: 
             Muốn vào http://localhost:4000/ mà không lỗi thì thêm route test:
 
             app.get("/", (req, res) => {
             res.send("Backend API is running...");
             });
-===========================================================================
+=======================================================================================================
 
 
-Lỗi: 
+### Lỗi: 
             DB error khi vào /api/accounts
 
-Nguyên nhân:
+### Nguyên nhân:
             Trong server.js bạn đang bật:
             ssl: { rejectUnauthorized: false }
             Nhưng Postgres server của bạn (raitek.cloud:5432) không hỗ trợ SSL, nên kết nối bị từ chối.
             
-Fix:
+### Fix:
             Chỉ cần bỏ cấu hình SSL đi.
             Sửa lại Pool config thành:
 
@@ -75,7 +75,9 @@ Fix:
             database: "IOTdev"
             // ❌ bỏ ssl
             });
-hoặc:
+            
+            OR
+            
             const pool = new Pool({
             host: "raitek.cloud",
             port: 5432,
