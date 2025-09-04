@@ -1,10 +1,15 @@
 # Server_postgres
 http://localhost:4000/api/accounts → trả JSON danh sách account (20 dòng đầu tiên).
-http://localhost:4000/api/projects → danh sách project.
-http://localhost:4000/api/tasks → danh sách task.
-http://localhost:4000/api/typeofworks → danh sách typeofWorks.
 
+http://localhost:4000/api/projects → danh sách project.
+
+http://localhost:4000/api/tasks → danh sách task.
+
+
+http://localhost:4000/api/typeofworks → danh sách typeofWorks.
+===========================================================================
 *Lưu ý: tránh dùng port 3000 trùng với backend server presign URL của MinIO
+===========================================================================
 
 Lỗi: 
             [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///.../server.js is not specified and it doesn't parse as CommonJS.
@@ -30,6 +35,7 @@ Fix:
             }
 
 
+===========================================================================
 
 
 Lỗi:        
@@ -44,6 +50,7 @@ Fix:
             app.get("/", (req, res) => {
             res.send("Backend API is running...");
             });
+===========================================================================
 
 
 Lỗi: 
