@@ -143,18 +143,28 @@ app.get("/api/assigns", async (_req, res) => {
 });
 
 // Lấy 1 bản ghi theo id_assign (optional)
-app.get("/api/assigns/:id", async (req, res) => {
-  const { id } = req.params;
+// ✅ Trả danh sách assigns theo id_code (array)
+app.get("/api/assigns/:id_code", async (req, res) => {
   try {
-    const q = `SELECT * FROM "Project"."Assign" WHERE id_code = $1`;
-    const result = await pool.query(q, [id]);
-    if (result.rows.length === 0) return res.status(404).json({ error: "Assign not found" });
-    res.json(result.rows[0]);
+    const idCode = parseInt(req.params.id_code, 10);
+    if (Number.isNaN(idCode)) return res.json([]);
+
+    const q = `
+      SELECT *
+      FROM "Project"."Assign"
+      WHERE id_code = $1
+      ORDER BY id_assign DESC
+      LIMIT 200
+    `;
+    const result = await pool.query(q, [idCode]);
+    console.log(`[GET /api/assigns/${idCode}] rows=`, result.rowCount);
+    res.json(result.rows); // <-- TRẢ VỀ MẢNG
   } catch (err) {
-    console.error("GET /api/assigns/:id error:", err);
+    console.error("GET /api/assigns/:id_code error:", err);
     res.status(500).send("DB error");
   }
 });
+
 
 // ➕ INSERT từ app (quan trọng)
 app.post("/api/assigns", async (req, res) => {
@@ -214,4 +224,5 @@ const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ API chạy tại http://localhost:${PORT}`);
 });
+
 
