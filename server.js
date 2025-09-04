@@ -146,7 +146,7 @@ app.get("/api/assigns", async (_req, res) => {
 app.get("/api/assigns/:id", async (req, res) => {
   const { id } = req.params;
   try {
-    const q = `SELECT * FROM "Project"."Assign" WHERE idproject = $1`;
+    const q = `SELECT * FROM "Project"."Assign" WHERE id_code = $1`;
     const result = await pool.query(q, [id]);
     if (result.rows.length === 0) return res.status(404).json({ error: "Assign not found" });
     res.json(result.rows[0]);
@@ -214,3 +214,4 @@ const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ API chạy tại http://localhost:${PORT}`);
 });
+
