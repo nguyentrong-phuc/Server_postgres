@@ -13,17 +13,17 @@ http://localhost:4000/api/typeofworks → danh sách typeofWorks.
 
 ===========================================================================
 
-Lỗi: 
+##Lỗi: 
             [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///.../server.js is not specified and it doesn't parse as CommonJS.
             Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
             To eliminate this warning, add "type": "module" to C:\Users\admin\my-backend\package.json.
 
-Nguyên nhân: 
+##Nguyên nhân: 
             Bạn đang viết code bằng ESM (ES Module) (import express from "express";), nhưng package.json của project chưa khai báo "type": "module".
 
             Node.js vì vậy phải tự động detect → chạy được nhưng cảnh báo hiệu năng.
 
-Fix: 
+##Fix: 
             {
             "name": "my-backend",
             "version": "1.0.0",
