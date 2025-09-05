@@ -144,26 +144,104 @@ app.get("/api/assigns", async (_req, res) => {
 
 // Lấy 1 bản ghi theo id_assign (optional)
 // ✅ Trả danh sách assigns theo id_code (array)
-app.get("/api/assigns/:id_code", async (req, res) => {
+/* ---------- ASSIGN: lấy theo từng cột ID (đủ tất cả cột) ---------- */
+
+// 1) Lấy 1 bản ghi theo id_assign (đã có, ghi lại cho đầy đủ)
+app.get("/api/assign/:id_assign", async (req, res) => {
+  try {
+    const idAssign = parseInt(req.params.id_assign, 10);
+    if (Number.isNaN(idAssign)) return res.status(400).json({ error: "Invalid id_assign" });
+
+    const q = `SELECT * FROM "Project"."Assign" WHERE id_assign = $1`;
+    const result = await pool.query(q, [idAssign]);
+    if (result.rows.length === 0) return res.status(404).json({ error: "Assign not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("GET /api/assign/:id_assign error:", err);
+    res.status(500).send("DB error");
+  }
+});
+
+// 2) Lấy DANH SÁCH theo id_code (array)
+app.get("/api/assign/by-code/:id_code", async (req, res) => {
   try {
     const idCode = parseInt(req.params.id_code, 10);
-    if (Number.isNaN(idCode)) return res.json([]);
+    if (Number.isNaN(idCode)) return res.status(400).json({ error: "Invalid id_code" });
 
     const q = `
-      SELECT *
-      FROM "Project"."Assign"
+      SELECT * FROM "Project"."Assign"
       WHERE id_code = $1
       ORDER BY id_assign DESC
       LIMIT 200
     `;
     const result = await pool.query(q, [idCode]);
-    console.log(`[GET /api/assigns/${idCode}] rows=`, result.rowCount);
-    res.json(result.rows); // <-- TRẢ VỀ MẢNG
+    res.json(result.rows);
   } catch (err) {
-    console.error("GET /api/assigns/:id_code error:", err);
+    console.error("GET /api/assign/by-code/:id_code error:", err);
     res.status(500).send("DB error");
   }
 });
+
+// 3) Lấy DANH SÁCH theo idproject (array)
+app.get("/api/assign/by-project/:idproject", async (req, res) => {
+  try {
+    const idProject = parseInt(req.params.idproject, 10);
+    if (Number.isNaN(idProject)) return res.status(400).json({ error: "Invalid idproject" });
+
+    const q = `
+      SELECT * FROM "Project"."Assign"
+      WHERE idproject = $1
+      ORDER BY id_assign DESC
+      LIMIT 200
+    `;
+    const result = await pool.query(q, [idProject]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/assign/by-project/:idproject error:", err);
+    res.status(500).send("DB error");
+  }
+});
+
+// 4) Lấy DANH SÁCH theo id_process (array)
+app.get("/api/assign/by-process/:id_process", async (req, res) => {
+  try {
+    const idProcess = parseInt(req.params.id_process, 10);
+    if (Number.isNaN(idProcess)) return res.status(400).json({ error: "Invalid id_process" });
+
+    const q = `
+      SELECT * FROM "Project"."Assign"
+      WHERE id_process = $1
+      ORDER BY id_assign DESC
+      LIMIT 200
+    `;
+    const result = await pool.query(q, [idProcess]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/assign/by-process/:id_process error:", err);
+    res.status(500).send("DB error");
+  }
+});
+
+// 5) Lấy DANH SÁCH theo id_work (array)
+app.get("/api/assign/by-work/:id_work", async (req, res) => {
+  try {
+    const idWork = parseInt(req.params.id_work, 10);
+    if (Number.isNaN(idWork)) return res.status(400).json({ error: "Invalid id_work" });
+
+    const q = `
+      SELECT * FROM "Project"."Assign"
+      WHERE id_work = $1
+      ORDER BY id_assign DESC
+      LIMIT 200
+    `;
+    const result = await pool.query(q, [idWork]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/assign/by-work/:id_work error:", err);
+    res.status(500).send("DB error");
+  }
+});
+
 
 
 // ➕ INSERT từ app (quan trọng)
@@ -180,6 +258,7 @@ app.post("/api/assigns", async (req, res) => {
       work_status,
       report_status,
       daily_status,
+      check_in,  
     } = req.body || {};
 
     // Yêu cầu tối thiểu
@@ -201,13 +280,14 @@ app.post("/api/assigns", async (req, res) => {
       work_status ?? null,
       report_status ?? null,
       daily_status ?? null,
+      (check_in ?? 'pending'),
     ];
 
     const sql = `
       INSERT INTO "Project"."Assign"
       (id_code, idproject, id_process, id_work,
-       time_in, time_out, project_status, work_status, report_status, daily_status)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       time_in, time_out, project_status, work_status, report_status, daily_status, check_in) 
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)                                             
       RETURNING *;
     `;
 
@@ -224,5 +304,6 @@ const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ API chạy tại http://localhost:${PORT}`);
 });
+
 
 
