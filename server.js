@@ -351,6 +351,27 @@ app.get("/api/assign/by-report-status/:status", buildStatusQuery("report_status"
 // 4) daily_status
 app.get("/api/assign/by-daily-status/:status", buildStatusQuery("daily_status"));
 
+// ==================== ASSIGN: lọc theo time_work (ngày cụ thể) ====================
+// :date dạng YYYY-MM-DD
+app.get("/api/assign/by-time-work/:date", async (req, res) => {
+  try {
+    const date = req.params.date;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: "Invalid date format, dùng YYYY-MM-DD" });
+    }
+
+    const q = `
+      SELECT * FROM "Project"."Assign"
+      WHERE time_work = $1
+      ORDER BY id_assign DESC
+    `;
+    const result = await pool.query(q, [date]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/assign/by-time-work/:date error:", err);
+    res.status(500).send("DB error");
+  }
+});
 
 
 // ➕ INSERT từ app (quan trọng)
@@ -367,7 +388,7 @@ app.post("/api/assigns", async (req, res) => {
       work_status,
       report_status,
       daily_status,
-      check_in,  
+      time_work,   
     } = req.body || {};
 
     // Yêu cầu tối thiểu
@@ -389,14 +410,15 @@ app.post("/api/assigns", async (req, res) => {
       work_status ?? null,
       report_status ?? null,
       daily_status ?? null,
-      (check_in ?? 'pending'),
+      time_work ?? null,   // ✅ thêm vào cuối
     ];
 
     const sql = `
       INSERT INTO "Project"."Assign"
       (id_code, idproject, id_process, id_work,
-       time_in, time_out, project_status, work_status, report_status, daily_status, check_in) 
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)                                             
+       time_in, time_out, project_status, work_status,
+       report_status, daily_status, time_work)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
       RETURNING *;
     `;
 
@@ -408,11 +430,13 @@ app.post("/api/assigns", async (req, res) => {
   }
 });
 
+
 /* ---------------------- START SERVER ---------------------- */
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ API chạy tại http://localhost:${PORT}`);
 });
+
 
 
 
