@@ -242,6 +242,108 @@ app.get("/api/assign/by-work/:id_work", async (req, res) => {
   }
 });
 
+// ==================== ASSIGN: lọc theo khoảng thời gian ====================
+// Query: ?from=YYYY-MM-DD HH:MM:SS&to=YYYY-MM-DD HH:MM:SS&limit=500
+// - Có thể truyền chỉ from hoặc chỉ to.
+// - Nếu cột time_in/time_out là TEXT, ta cast: NULLIF(col,'')::timestamp
+// - Nếu là TIMESTAMP thật, xem ghi chú bên dưới để rút gọn điều kiện.
+
+app.get("/api/assign/by-time-in", async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const lim = Math.min(parseInt(req.query.limit, 10) || 500, 2000);
+
+    const conds = [];
+    const params = [];
+
+    if (from) { params.push(from); conds.push(`NULLIF(time_in,'')::timestamp >= $${params.length}::timestamp`); }
+    if (to)   { params.push(to);   conds.push(`NULLIF(time_in,'')::timestamp <= $${params.length}::timestamp`); }
+
+    const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+    const q = `SELECT * FROM "Project"."Assign" ${where} ORDER BY id_assign DESC LIMIT ${lim}`;
+    const result = await pool.query(q, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/assign/by-time-in error:", err);
+    res.status(500).send("DB error");
+  }
+});
+
+app.get("/api/assign/by-time-out", async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const lim = Math.min(parseInt(req.query.limit, 10) || 500, 2000);
+
+    const conds = [];
+    const params = [];
+
+    if (from) { params.push(from); conds.push(`NULLIF(time_out,'')::timestamp >= $${params.length}::timestamp`); }
+    if (to)   { params.push(to);   conds.push(`NULLIF(time_out,'')::timestamp <= $${params.length}::timestamp`); }
+
+    const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+    const q = `SELECT * FROM "Project"."Assign" ${where} ORDER BY id_assign DESC LIMIT ${lim}`;
+    const result = await pool.query(q, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/assign/by-time-out error:", err);
+    res.status(500).send("DB error");
+  }
+});
+
+/* ---------- ASSIGN: lọc theo STATUS (project | work | report | daily) ---------- */
+
+// helper nhỏ để dùng lại
+function buildStatusQuery(col) {
+  return async (req, res) => {
+    try {
+      const statusParam = String(req.params.status || "").trim();
+      const valuesParam = req.query.values
+        ? String(req.query.values)
+            .split(",")
+            .map(s => s.trim().toLowerCase())
+            .filter(Boolean)
+        : null;
+
+      const limit = Math.min(parseInt(req.query.limit, 10) || 500, 2000);
+
+      let q, params;
+      if (valuesParam && valuesParam.length) {
+        // so khớp theo danh sách đồng nghĩa (chính xác, không wildcard)
+        q = `SELECT * FROM "Project"."Assign"
+             WHERE LOWER(${col}) = ANY($1)
+             ORDER BY id_assign DESC
+             LIMIT $2`;
+        params = [valuesParam, limit];
+      } else {
+        // so khớp 1 giá trị (ILIKE cho phép không phân biệt hoa thường, có thể truyền %)
+        q = `SELECT * FROM "Project"."Assign"
+             WHERE ${col} ILIKE $1
+             ORDER BY id_assign DESC
+             LIMIT $2`;
+        params = [statusParam, limit];
+      }
+
+      const result = await pool.query(q, params);
+      res.json(result.rows);
+    } catch (err) {
+      console.error(`GET by status (${col}) error:`, err);
+      res.status(500).send("DB error");
+    }
+  };
+}
+
+// 1) project_status
+app.get("/api/assign/by-project-status/:status", buildStatusQuery("project_status"));
+
+// 2) work_status
+app.get("/api/assign/by-work-status/:status", buildStatusQuery("work_status"));
+
+// 3) report_status
+app.get("/api/assign/by-report-status/:status", buildStatusQuery("report_status"));
+
+// 4) daily_status
+app.get("/api/assign/by-daily-status/:status", buildStatusQuery("daily_status"));
+
 
 
 // ➕ INSERT từ app (quan trọng)
@@ -304,6 +406,7 @@ const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ API chạy tại http://localhost:${PORT}`);
 });
+
 
 
 
