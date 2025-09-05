@@ -430,12 +430,215 @@ app.post("/api/assigns", async (req, res) => {
   }
 });
 
+/* ====================== ASSIGN: UPDATE STATUS ====================== */
+
+/** Helper: chuẩn hoá text ngắn (tránh rác) */
+const normText = (v, max = 100) =>
+  (v == null ? null : String(v).trim().slice(0, max));
+
+/** Helper: update đúng 1 cột status */
+function buildStatusUpdateEndpoint(col, pathSuffix) {
+  // PATCH body: { value: "assigned" }  hoặc  query: ?value=assigned  hoặc  /:value
+  app.patch(`/api/assign/:id_assign/${pathSuffix}`, async (req, res) => {
+    try {
+      const idAssign = parseInt(req.params.id_assign, 10);
+      if (Number.isNaN(idAssign)) return res.status(400).json({ error: "Invalid id_assign" });
+
+      const valueFromPath = req.params.value; // (nếu có ở route biến thể)
+      const value =
+        normText(req.body?.value) ||
+        normText(req.query?.value) ||
+        normText(valueFromPath);
+
+      if (!value) return res.status(400).json({ error: "Missing status value" });
+
+      const sql = `UPDATE "Project"."Assign"
+                   SET ${col} = $1
+                   WHERE id_assign = $2
+                   RETURNING *;`;
+      const result = await pool.query(sql, [value, idAssign]);
+      if (result.rows.length === 0) return res.status(404).json({ error: "Assign not found" });
+      res.json(result.rows[0]);
+    } catch (err) {
+      console.error(`PATCH /api/assign/:id_assign/${pathSuffix} error:`, err);
+      res.status(500).send("DB error");
+    }
+  });
+
+  // Biến thể có giá trị trong path:  /api/assign/123/<suffix>/done
+  app.patch(`/api/assign/:id_assign/${pathSuffix}/:value`, async (req, res) => {
+    req.params.value = req.params.value; // để dùng chung logic trên
+    return app._router.handle(req, res); // chuyển cho handler ở trên
+  });
+}
+
+/* ---- 4 endpoint đổi 4 cột trạng thái ---- */
+buildStatusUpdateEndpoint("project_status", "project-status");
+buildStatusUpdateEndpoint("work_status",    "work-status");
+buildStatusUpdateEndpoint("report_status",  "report-status");
+buildStatusUpdateEndpoint("daily_status",   "daily-status");
+
+
+/* ======= ASSIGN: UPDATE NHIỀU TRƯỜNG (khớp app gọi PUT /assigns/:id) ======= */
+/* Hỗ trợ cập nhật các trường sau (nếu có trong body):
+   - project_status, work_status, report_status, daily_status
+   - time_in, time_out, time_work
+   - alias: checkin_time -> time_in,  checkout_time -> time_out
+*/
+async function updateAssignManyFields(req, res) {
+  try {
+    const idAssign = parseInt(req.params.id_assign, 10);
+    if (Number.isNaN(idAssign)) return res.status(400).json({ error: "Invalid id_assign" });
+
+    const body = req.body || {};
+
+    // alias để app cũ không phải sửa code
+    const payload = {
+      project_status: normText(body.project_status),
+      work_status:    normText(body.work_status),
+      report_status:  normText(body.report_status),
+      daily_status:   normText(body.daily_status),
+      time_in:        normText(body.time_in ?? body.checkin_time,  100),
+      time_out:       normText(body.time_out ?? body.checkout_time, 100),
+      time_work:      normText(body.time_work, 100),
+    };
+
+    const sets = [];
+    const params = [];
+    for (const [k, v] of Object.entries(payload)) {
+      if (v !== null && v !== undefined) {
+        params.push(v);
+        // cột có dấu gạch dưới nên không cần quote tên cột
+        sets.push(`${k} = $${params.length}`);
+      }
+    }
+
+    if (sets.length === 0) {
+      return res.status(400).json({ error: "No updatable fields in body" });
+    }
+
+    params.push(idAssign);
+    const sql = `UPDATE "Project"."Assign"
+                 SET ${sets.join(", ")}
+                 WHERE id_assign = $${params.length}
+                 RETURNING *;`;
+
+    const result = await pool.query(sql, params);
+    if (result.rows.length === 0) return res.status(404).json({ error: "Assign not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("UPDATE many fields error:", err);
+    res.status(500).send("DB error");
+  }
+}
+
+// Cho phép cả PUT lẫn PATCH để tránh 404 từ app cũ
+app.put(  "/api/assigns/:id_assign", updateAssignManyFields);
+app.patch("/api/assigns/:id_assign", updateAssignManyFields);
+
+
+
+
+
+
+
+
+/* ========== ASSIGN: UPDATE ==========
+   - PUT /api/assign/:id_assign  (generic patch)
+   - POST /api/assign/:id_assign/checkin       → work: IN_PROGRESS, project: SUCCESS, time_work=today
+   - POST /api/assign/:id_assign/report-wait   → report: WAIT, project: SUCCESS, work: WAIT
+==================================== */
+
+const ALLOWED_ASSIGN_COLUMNS = new Set([
+  "project_status","work_status","report_status","daily_status",
+  "time_in","time_out","time_work","id_process","id_work","note"
+]);
+
+app.put("/api/assign/:id_assign", async (req, res) => {
+  try {
+    const idAssign = parseInt(req.params.id_assign, 10);
+    if (Number.isNaN(idAssign)) return res.status(400).json({ error: "Invalid id_assign" });
+
+    const patch = req.body || {};
+    const cols = [];
+    const vals = [];
+
+    for (const [k, v] of Object.entries(patch)) {
+      if (!ALLOWED_ASSIGN_COLUMNS.has(k)) continue;      // tránh SQL injection
+      cols.push(`"${k}"=$${cols.length + 1}`);
+      vals.push(v);
+    }
+    if (!cols.length) return res.status(400).json({ error: "No allowed fields" });
+
+    vals.push(idAssign);
+    const sql = `UPDATE "Project"."Assign" SET ${cols.join(", ")} WHERE id_assign=$${vals.length}`;
+    await pool.query(sql, vals);
+
+    const row = await pool.query(`SELECT * FROM "Project"."Assign" WHERE id_assign=$1`, [idAssign]);
+    res.json(row.rows?.[0] ?? {});
+  } catch (err) {
+    console.error("PUT /api/assign/:id_assign error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Check-in: set trạng thái khi user bấm vào công việc ở màn Work
+app.post("/api/assign/:id_assign/checkin", async (req, res) => {
+  try {
+    const idAssign = parseInt(req.params.id_assign, 10);
+    if (Number.isNaN(idAssign)) return res.status(400).json({ error: "Invalid id_assign" });
+
+    // time_work lưu kiểu varchar → set Y-m-d
+    const sql = `
+      UPDATE "Project"."Assign"
+      SET work_status='IN_PROGRESS',
+          project_status='SUCCESS',
+          time_work = COALESCE(time_work, TO_CHAR(CURRENT_DATE,'YYYY-MM-DD'))
+      WHERE id_assign=$1
+      RETURNING *;
+    `;
+    const result = await pool.query(sql, [idAssign]);
+    res.json(result.rows?.[0] ?? {});
+  } catch (err) {
+    console.error("POST /api/assign/:id_assign/checkin error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Sau khi Save ở ShortcutReport → set WAIT
+app.post("/api/assign/:id_assign/report-wait", async (req, res) => {
+  try {
+    const idAssign = parseInt(req.params.id_assign, 10);
+    if (Number.isNaN(idAssign)) return res.status(400).json({ error: "Invalid id_assign" });
+
+    const sql = `
+      UPDATE "Project"."Assign"
+      SET report_status='WAIT',
+          project_status='SUCCESS',
+          work_status='WAIT'
+      WHERE id_assign=$1
+      RETURNING *;
+    `;
+    const result = await pool.query(sql, [idAssign]);
+    res.json(result.rows?.[0] ?? {});
+  } catch (err) {
+
+    console.error("POST /api/assign/:id_assign/report-wait error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
+
+
 
 /* ---------------------- START SERVER ---------------------- */
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ API chạy tại http://localhost:${PORT}`);
 });
+
 
 
 
