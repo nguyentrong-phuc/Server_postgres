@@ -17,6 +17,13 @@ const pool = new Pool({
   ssl: false,
 });
 
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    ok: true,
+    ts: new Date().toISOString()
+  });
+});
+
 // ✅ Route test
 app.get("/", (req, res) => {
   res.send("Backend API is running...");
@@ -406,6 +413,7 @@ const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ API chạy tại http://localhost:${PORT}`);
 });
+
 
 
 
