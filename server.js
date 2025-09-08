@@ -1,5 +1,5 @@
-// server.js (ESM)
-// Node 18+, Express 4, pg 8
+// server.js (ESM) – Node 18+, Express 4, pg 8
+// ĐÃ HỖ TRỢ: get/put/post cho cột "Number_of_devices" trong bảng assign
 
 import express from "express";
 import cors from "cors";
@@ -18,7 +18,7 @@ const pool = new Pool({
   user: "mtryha11",
   password: "Hpx21led",
   database: "IOTdev",
-  ssl: false, // đổi true nếu DB yêu cầu SSL
+  ssl: false, // true nếu DB yêu cầu SSL
 });
 
 // đảm bảo dùng schema Project mặc định
@@ -152,8 +152,8 @@ app.get("/api/processes/:id_process", async (req, res) => {
 });
 
 // ====================== ASSIGN ======================
-// Schema mới của assign: id_assign, id_user, id_project, id_process, id_task,
-// time_in, time_out, project_status, work_status, report_status, daily_status, time_work
+// Schema assign: id_assign, id_user, id_project, id_process, id_task,
+// time_in, time_out, project_status, work_status, report_status, daily_status, time_work, "Number_of_devices"
 
 // List cơ bản
 app.get("/api/assigns", async (req, res) => {
@@ -275,7 +275,7 @@ app.get("/api/assigns/full", async (req, res) => {
   }
 });
 
-// Insert assign
+// Insert assign (CÓ "Number_of_devices")
 app.post("/api/assigns", async (req, res) => {
   try {
     const {
@@ -290,9 +290,10 @@ app.post("/api/assigns", async (req, res) => {
       report_status,
       daily_status,
       time_work,
+      Number_of_devices,   // ✅ thêm field vào body
     } = req.body || {};
 
-    // validate số
+    // validate số bắt buộc
     const needInt = { id_user, id_project, id_process, id_task };
     for (const [k, v] of Object.entries(needInt)) {
       if (v === undefined || v === null || Number.isNaN(toInt(v)))
@@ -303,8 +304,9 @@ app.post("/api/assigns", async (req, res) => {
       `
       INSERT INTO assign
         (id_user, id_project, id_process, id_task,
-         time_in, time_out, project_status, work_status, report_status, daily_status, time_work)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         time_in, time_out, project_status, work_status,
+         report_status, daily_status, time_work, "Number_of_devices")
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       RETURNING *;
       `,
       [
@@ -319,6 +321,7 @@ app.post("/api/assigns", async (req, res) => {
         normText(report_status, 100),
         normText(daily_status, 100),
         normText(time_work, 100),
+        Number.isFinite(Number(Number_of_devices)) ? toInt(Number_of_devices) : null, // ✅
       ]
     );
     res.status(201).json(rows[0]);
@@ -328,7 +331,7 @@ app.post("/api/assigns", async (req, res) => {
   }
 });
 
-// Update nhiều trường (partial)
+// Update nhiều trường (partial) – CÓ "Number_of_devices"
 app.put("/api/assigns/:id_assign", async (req, res) => {
   try {
     const id = toInt(req.params.id_assign);
@@ -347,14 +350,17 @@ app.put("/api/assigns/:id_assign", async (req, res) => {
       work_status:    normText(b.work_status, 100),
       report_status:  normText(b.report_status, 100),
       daily_status:   normText(b.daily_status, 100),
+      Number_of_devices: b.Number_of_devices != null ? toInt(b.Number_of_devices) : null, // ✅
     };
 
     const sets = [];
     const params = [];
     for (const [col, val] of Object.entries(payload)) {
+      // id_* nếu NaN thì bỏ qua; các text null/undefined bỏ qua
       if (val !== null && val !== undefined && !(Number.isNaN(val) && /id_/.test(col))) {
         params.push(val);
-        sets.push(`${col} = $${params.length}`);
+        // cột có chữ hoa cần quote
+        sets.push(`"${col}" = $${params.length}`);
       }
     }
     if (!sets.length) return res.status(400).json({ error: "No valid fields" });
@@ -407,11 +413,11 @@ app.post("/api/assigns/:id_assign/checkout", async (req, res) => {
   }
 });
 
-// ====================== FILTER STATUS (chuẩn theo yêu cầu trước) ======================
+// ====================== FILTER STATUS ======================
 function buildStatusQuery(field) {
   return async (req, res) => {
     try {
-      const status = req.params.status; // có thể là 'anything' hoặc có %...%
+      const status = req.params.status; // 'anything' hoặc có %...%
       const lim = Math.min(toInt(req.query.limit) || 500, 2000);
       const valuesParam = req.query.values; // "a,b,c"
       const params = [];
