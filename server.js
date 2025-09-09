@@ -1,7 +1,7 @@
 // server.js (ESM) – Node 18+, Express 4, pg 8
 // Hỗ trợ đầy đủ GET/POST/PUT cho:
 // - "Number_of_devices" (int)
-// - "Number_of_process" (int)
+// - "id_working_process" (int)   <-- dùng thay cho Number_of_process
 // - "unit" (varchar 100)
 
 import express from "express";
@@ -154,10 +154,40 @@ app.get("/api/processes/:id_process", async (req, res) => {
   }
 });
 
+// ====================== WORKING_PROCESS ======================
+// Bảng: working_process (id_working_process, working_process_name)
+app.get("/api/working-processes", async (_req, res) => {
+  try {
+    const rows = await q(
+      `SELECT * FROM working_process ORDER BY id_working_process LIMIT 200`
+    );
+    res.json(rows);
+  } catch (e) {
+    console.error("GET /api/working-processes", e);
+    res.status(500).send("DB error");
+  }
+});
+
+app.get("/api/working-processes/:id_working_process", async (req, res) => {
+  try {
+    const id = toInt(req.params.id_working_process);
+    if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id_working_process" });
+    const rows = await q(
+      `SELECT * FROM working_process WHERE id_working_process = $1`,
+      [id]
+    );
+    if (!rows.length) return res.status(404).json({ error: "Not found" });
+    res.json(rows[0]);
+  } catch (e) {
+    console.error("GET /api/working-processes/:id", e);
+    res.status(500).send("DB error");
+  }
+});
+
 // ====================== ASSIGN ======================
 // Schema assign: id_assign, id_user, id_project, id_process, id_task,
 // time_in, time_out, project_status, work_status, report_status, daily_status, time_work,
-// "Number_of_devices", "Number_of_process", unit
+// "Number_of_devices", id_working_process, unit
 
 // List cơ bản
 app.get("/api/assigns", async (req, res) => {
@@ -252,6 +282,23 @@ app.get("/api/assigns/by-process/:id_process", async (req, res) => {
   }
 });
 
+// NEW: filter theo id_working_process
+app.get("/api/assigns/by-working-process/:id_working_process", async (req, res) => {
+  try {
+    const id = toInt(req.params.id_working_process);
+    if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id_working_process" });
+    const lim = Math.min(toInt(req.query.limit) || 500, 2000);
+    const rows = await q(
+      `SELECT * FROM assign WHERE id_working_process = $1 ORDER BY id_assign DESC LIMIT ${lim}`,
+      [id]
+    );
+    res.json(rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).send("DB error");
+  }
+});
+
 // View join đầy đủ (rất tiện cho app)
 app.get("/api/assigns/full", async (req, res) => {
   try {
@@ -259,15 +306,17 @@ app.get("/api/assigns/full", async (req, res) => {
     const rows = await q(
       `
       SELECT a.*,
-             u.staff        AS user_name,
-             p.project      AS project_name,
-             t.task_name    AS task_name,
-             pr.process     AS process_name
+             u.staff                 AS user_name,
+             p.project               AS project_name,
+             t.task_name             AS task_name,
+             pr.process              AS process_name,
+             wp.working_process_name AS working_process_name
       FROM assign a
-      LEFT JOIN account u  ON u.id_user    = a.id_user
-      LEFT JOIN project p  ON p.id_project = a.id_project
-      LEFT JOIN task t     ON t.id_task    = a.id_task
-      LEFT JOIN process pr ON pr.id_process= a.id_process
+      LEFT JOIN account         u  ON u.id_user             = a.id_user
+      LEFT JOIN project         p  ON p.id_project          = a.id_project
+      LEFT JOIN task            t  ON t.id_task             = a.id_task
+      LEFT JOIN process         pr ON pr.id_process         = a.id_process
+      LEFT JOIN working_process wp ON wp.id_working_process = a.id_working_process
       ORDER BY a.id_assign DESC
       LIMIT ${lim}
       `
@@ -279,7 +328,7 @@ app.get("/api/assigns/full", async (req, res) => {
   }
 });
 
-// Insert assign (CÓ Number_of_devices + Number_of_process + unit)
+// Insert assign (CÓ Number_of_devices + id_working_process + unit)
 app.post("/api/assigns", async (req, res) => {
   try {
     const {
@@ -294,9 +343,9 @@ app.post("/api/assigns", async (req, res) => {
       report_status,
       daily_status,
       time_work,
-      Number_of_devices,   // optional int
-      Number_of_process,   // optional int
-      unit,                // optional varchar(100)
+      Number_of_devices,     // optional int
+      id_working_process,    // optional int (thay cho Number_of_process)
+      unit,                  // optional varchar(100)
     } = req.body || {};
 
     // validate số bắt buộc
@@ -312,7 +361,7 @@ app.post("/api/assigns", async (req, res) => {
         (id_user, id_project, id_process, id_task,
          time_in, time_out, project_status, work_status,
          report_status, daily_status, time_work,
-         "Number_of_devices", "Number_of_process", unit)
+         "Number_of_devices", id_working_process, unit)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
       RETURNING *;
       `,
@@ -329,7 +378,7 @@ app.post("/api/assigns", async (req, res) => {
         normText(daily_status, 100),
         normText(time_work, 100),
         Number.isFinite(Number(Number_of_devices)) ? toInt(Number_of_devices) : null,
-        Number.isFinite(Number(Number_of_process)) ? toInt(Number_of_process) : null,
+        Number.isFinite(Number(id_working_process)) ? toInt(id_working_process) : null,
         normText(unit, 100),
       ]
     );
@@ -340,7 +389,7 @@ app.post("/api/assigns", async (req, res) => {
   }
 });
 
-// Update nhiều trường (partial) – CÓ Number_of_devices + Number_of_process + unit
+// Update nhiều trường (partial) – CÓ Number_of_devices + id_working_process + unit
 app.put("/api/assigns/:id_assign", async (req, res) => {
   try {
     const id = toInt(req.params.id_assign);
@@ -352,6 +401,9 @@ app.put("/api/assigns/:id_assign", async (req, res) => {
       id_project:     b.id_project != null ? toInt(b.id_project) : undefined,
       id_task:        b.id_task != null ? toInt(b.id_task) : undefined,
       id_process:     b.id_process != null ? toInt(b.id_process) : undefined,
+      id_working_process: b.id_working_process != null
+        ? (Number.isFinite(Number(b.id_working_process)) ? toInt(b.id_working_process) : null)
+        : undefined,
       time_in:        b.time_in != null ? normText(b.time_in ?? b.checkin_time, 100) : undefined,
       time_out:       b.time_out != null ? normText(b.time_out ?? b.checkout_time, 100) : undefined,
       time_work:      b.time_work != null ? normText(b.time_work, 100) : undefined,
@@ -363,10 +415,6 @@ app.put("/api/assigns/:id_assign", async (req, res) => {
         b.Number_of_devices != null && Number.isFinite(Number(b.Number_of_devices))
           ? toInt(b.Number_of_devices)
           : (b.Number_of_devices != null ? null : undefined), // nếu gửi null/invalid -> set NULL
-      "Number_of_process":
-        b.Number_of_process != null && Number.isFinite(Number(b.Number_of_process))
-          ? toInt(b.Number_of_process)
-          : (b.Number_of_process != null ? null : undefined),
       unit:           b.unit != null ? normText(b.unit, 100) : undefined,
     };
 
@@ -375,7 +423,7 @@ app.put("/api/assigns/:id_assign", async (req, res) => {
     for (const [col, val] of Object.entries(payload)) {
       if (val !== undefined && !(Number.isNaN(val) && /^id_/.test(col))) {
         params.push(val);
-        sets.push(`"${col}" = $${params.length}`); // quote để an toàn cho cột PascalCase
+        sets.push(`"${col}" = $${params.length}`);
       }
     }
     if (!sets.length) return res.status(400).json({ error: "No valid fields" });
