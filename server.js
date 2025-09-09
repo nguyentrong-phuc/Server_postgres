@@ -1,5 +1,5 @@
 // server.js (ESM) – Node 18+, Express 4, pg 8
-// ĐÃ HỖ TRỢ: get/put/post cho cột "Number_of_devices" trong bảng assign
+// Hỗ trợ đầy đủ GET/POST/PUT cho "unit" (varchar 100) và "Number_of_devices"
 
 import express from "express";
 import cors from "cors";
@@ -153,7 +153,8 @@ app.get("/api/processes/:id_process", async (req, res) => {
 
 // ====================== ASSIGN ======================
 // Schema assign: id_assign, id_user, id_project, id_process, id_task,
-// time_in, time_out, project_status, work_status, report_status, daily_status, time_work, "Number_of_devices"
+// time_in, time_out, project_status, work_status, report_status, daily_status, time_work,
+// "Number_of_devices", unit
 
 // List cơ bản
 app.get("/api/assigns", async (req, res) => {
@@ -275,7 +276,7 @@ app.get("/api/assigns/full", async (req, res) => {
   }
 });
 
-// Insert assign (CÓ "Number_of_devices")
+// Insert assign (CÓ "Number_of_devices" + "unit")
 app.post("/api/assigns", async (req, res) => {
   try {
     const {
@@ -290,7 +291,8 @@ app.post("/api/assigns", async (req, res) => {
       report_status,
       daily_status,
       time_work,
-      Number_of_devices,   // ✅ thêm field vào body
+      Number_of_devices, // integer optional
+      unit,              // varchar(100) optional
     } = req.body || {};
 
     // validate số bắt buộc
@@ -305,8 +307,8 @@ app.post("/api/assigns", async (req, res) => {
       INSERT INTO assign
         (id_user, id_project, id_process, id_task,
          time_in, time_out, project_status, work_status,
-         report_status, daily_status, time_work, "Number_of_devices")
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         report_status, daily_status, time_work, "Number_of_devices", unit)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
       RETURNING *;
       `,
       [
@@ -321,7 +323,8 @@ app.post("/api/assigns", async (req, res) => {
         normText(report_status, 100),
         normText(daily_status, 100),
         normText(time_work, 100),
-        Number.isFinite(Number(Number_of_devices)) ? toInt(Number_of_devices) : null, // ✅
+        Number.isFinite(Number(Number_of_devices)) ? toInt(Number_of_devices) : null,
+        normText(unit, 100),
       ]
     );
     res.status(201).json(rows[0]);
@@ -331,7 +334,7 @@ app.post("/api/assigns", async (req, res) => {
   }
 });
 
-// Update nhiều trường (partial) – CÓ "Number_of_devices"
+// Update nhiều trường (partial) – CÓ "Number_of_devices" + "unit"
 app.put("/api/assigns/:id_assign", async (req, res) => {
   try {
     const id = toInt(req.params.id_assign);
@@ -350,16 +353,17 @@ app.put("/api/assigns/:id_assign", async (req, res) => {
       work_status:    normText(b.work_status, 100),
       report_status:  normText(b.report_status, 100),
       daily_status:   normText(b.daily_status, 100),
-      Number_of_devices: b.Number_of_devices != null ? toInt(b.Number_of_devices) : null, // ✅
+      Number_of_devices: b.Number_of_devices != null ? toInt(b.Number_of_devices) : null,
+      unit:           normText(b.unit, 100),
     };
 
     const sets = [];
     const params = [];
     for (const [col, val] of Object.entries(payload)) {
-      // id_* nếu NaN thì bỏ qua; các text null/undefined bỏ qua
+      // id_* nếu NaN thì bỏ qua; text null/undefined bỏ qua
       if (val !== null && val !== undefined && !(Number.isNaN(val) && /id_/.test(col))) {
         params.push(val);
-        // cột có chữ hoa cần quote
+        // cột có chữ hoa cần quote; lower-case quote vẫn OK
         sets.push(`"${col}" = $${params.length}`);
       }
     }
