@@ -1,9 +1,4 @@
 // server.js (ESM) – Node 18+, Express 4, pg 8
-// Hỗ trợ đầy đủ GET/POST/PUT cho:
-// - "Number_of_devices" (int)
-// - "Number_of_process" (int)
-// - "unit" (varchar 100)
-
 import express from "express";
 import cors from "cors";
 import pkg from "pg";
@@ -21,10 +16,9 @@ const pool = new Pool({
   user: "mtryha11",
   password: "Hpx21led",
   database: "IOTdev",
-  ssl: false, // true nếu DB yêu cầu SSL
+  ssl: false,
 });
 
-// đảm bảo dùng schema Project mặc định
 pool.on("connect", (client) => {
   client.query('SET search_path TO "Project", public');
 });
@@ -35,13 +29,14 @@ async function q(sql, params = []) {
   return r.rows;
 }
 
-// utils nhỏ
+// utils
 const toInt = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.trunc(n) : NaN;
 };
 const normText = (s, max = 255) =>
   s == null ? null : String(s).trim().slice(0, max);
+const hasText = (s) => s != null && String(s).trim() !== "";
 
 function likeify(s) {
   if (s == null) return null;
@@ -49,26 +44,27 @@ function likeify(s) {
   return raw.includes("%") ? raw : `%${raw}%`;
 }
 
+// ==== next id_note (>= 90101) ====
+async function nextNoteId() {
+  const r = await q(
+    `SELECT COALESCE(MAX(id_note), 90100) + 1 AS next FROM assign WHERE id_note >= 90101`
+  );
+  return r?.[0]?.next ?? 90101;
+}
+
 // ====================== HEALTH ======================
 app.get("/health", (_req, res) => {
   res.status(200).json({ ok: true, ts: new Date().toISOString() });
 });
-
-app.get("/", (_req, res) => {
-  res.send("Backend API is running...");
-});
+app.get("/", (_req, res) => res.send("Backend API is running..."));
 
 // ====================== ACCOUNT ======================
 app.get("/api/accounts", async (_req, res) => {
   try {
     const rows = await q(`SELECT * FROM account ORDER BY id_user LIMIT 200`);
     res.json(rows);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("DB error");
-  }
+  } catch { res.status(500).send("DB error"); }
 });
-
 app.get("/api/accounts/:id_user", async (req, res) => {
   try {
     const id = toInt(req.params.id_user);
@@ -76,10 +72,7 @@ app.get("/api/accounts/:id_user", async (req, res) => {
     const rows = await q(`SELECT * FROM account WHERE id_user = $1`, [id]);
     if (!rows.length) return res.status(404).json({ error: "Not found" });
     res.json(rows[0]);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("DB error");
-  }
+  } catch { res.status(500).send("DB error"); }
 });
 
 // ====================== PROJECT ======================
@@ -87,12 +80,8 @@ app.get("/api/projects", async (_req, res) => {
   try {
     const rows = await q(`SELECT * FROM project ORDER BY id_project LIMIT 200`);
     res.json(rows);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("DB error");
-  }
+  } catch { res.status(500).send("DB error"); }
 });
-
 app.get("/api/projects/:id_project", async (req, res) => {
   try {
     const id = toInt(req.params.id_project);
@@ -100,10 +89,7 @@ app.get("/api/projects/:id_project", async (req, res) => {
     const rows = await q(`SELECT * FROM project WHERE id_project = $1`, [id]);
     if (!rows.length) return res.status(404).json({ error: "Not found" });
     res.json(rows[0]);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("DB error");
-  }
+  } catch { res.status(500).send("DB error"); }
 });
 
 // ====================== TASK ======================
@@ -111,12 +97,8 @@ app.get("/api/tasks", async (_req, res) => {
   try {
     const rows = await q(`SELECT * FROM task ORDER BY id_task LIMIT 500`);
     res.json(rows);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("DB error");
-  }
+  } catch { res.status(500).send("DB error"); }
 });
-
 app.get("/api/tasks/:id_task", async (req, res) => {
   try {
     const id = toInt(req.params.id_task);
@@ -124,10 +106,7 @@ app.get("/api/tasks/:id_task", async (req, res) => {
     const rows = await q(`SELECT * FROM task WHERE id_task = $1`, [id]);
     if (!rows.length) return res.status(404).json({ error: "Not found" });
     res.json(rows[0]);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("DB error");
-  }
+  } catch { res.status(500).send("DB error"); }
 });
 
 // ====================== PROCESS ======================
@@ -135,12 +114,8 @@ app.get("/api/processes", async (_req, res) => {
   try {
     const rows = await q(`SELECT * FROM process ORDER BY id_process LIMIT 100`);
     res.json(rows);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("DB error");
-  }
+  } catch { res.status(500).send("DB error"); }
 });
-
 app.get("/api/processes/:id_process", async (req, res) => {
   try {
     const id = toInt(req.params.id_process);
@@ -148,32 +123,21 @@ app.get("/api/processes/:id_process", async (req, res) => {
     const rows = await q(`SELECT * FROM process WHERE id_process = $1`, [id]);
     if (!rows.length) return res.status(404).json({ error: "Not found" });
     res.json(rows[0]);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("DB error");
-  }
+  } catch { res.status(500).send("DB error"); }
 });
 
 // ====================== ASSIGN ======================
-// Schema assign: id_assign, id_user, id_project, id_process, id_task,
-// time_in, time_out, project_status, work_status, report_status, daily_status, time_work,
-// "Number_of_devices", "Number_of_process", unit
-
-// List cơ bản
+// NOTE: SELECT * đã bao gồm 3 cột mới, nên GET không cần đổi.
 app.get("/api/assigns", async (req, res) => {
   try {
     const limit = Math.min(toInt(req.query.limit) || 200, 2000);
-    const rows = await q(
-      `SELECT * FROM assign ORDER BY id_assign DESC LIMIT ${limit}`
-    );
+    const rows = await q(`SELECT * FROM assign ORDER BY id_assign DESC LIMIT ${limit}`);
     res.json(rows);
   } catch (e) {
     console.error("GET /api/assigns", e);
     res.status(500).send("DB error");
   }
 });
-
-// Lấy 1 assign
 app.get("/api/assigns/:id_assign", async (req, res) => {
   try {
     const id = toInt(req.params.id_assign);
@@ -181,78 +145,55 @@ app.get("/api/assigns/:id_assign", async (req, res) => {
     const rows = await q(`SELECT * FROM assign WHERE id_assign = $1`, [id]);
     if (!rows.length) return res.status(404).json({ error: "Not found" });
     res.json(rows[0]);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("DB error");
-  }
+  } catch { res.status(500).send("DB error"); }
 });
 
-// Các filter theo ID
 app.get("/api/assigns/by-project/:id_project", async (req, res) => {
   try {
     const id = toInt(req.params.id_project);
     if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id_project" });
     const lim = Math.min(toInt(req.query.limit) || 500, 2000);
     const rows = await q(
-      `SELECT * FROM assign WHERE id_project = $1 ORDER BY id_assign DESC LIMIT ${lim}`,
-      [id]
+      `SELECT * FROM assign WHERE id_project = $1 ORDER BY id_assign DESC LIMIT ${lim}`, [id]
     );
     res.json(rows);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("DB error");
-  }
+  } catch { res.status(500).send("DB error"); }
 });
-
 app.get("/api/assigns/by-user/:id_user", async (req, res) => {
   try {
     const id = toInt(req.params.id_user);
     if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id_user" });
     const lim = Math.min(toInt(req.query.limit) || 500, 2000);
     const rows = await q(
-      `SELECT * FROM assign WHERE id_user = $1 ORDER BY id_assign DESC LIMIT ${lim}`,
-      [id]
+      `SELECT * FROM assign WHERE id_user = $1 ORDER BY id_assign DESC LIMIT ${lim}`, [id]
     );
     res.json(rows);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("DB error");
-  }
+  } catch { res.status(500).send("DB error"); }
 });
-
 app.get("/api/assigns/by-task/:id_task", async (req, res) => {
   try {
     const id = toInt(req.params.id_task);
     if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id_task" });
     const lim = Math.min(toInt(req.query.limit) || 500, 2000);
     const rows = await q(
-      `SELECT * FROM assign WHERE id_task = $1 ORDER BY id_assign DESC LIMIT ${lim}`,
-      [id]
+      `SELECT * FROM assign WHERE id_task = $1 ORDER BY id_assign DESC LIMIT ${lim}`, [id]
     );
     res.json(rows);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("DB error");
-  }
+  } catch { res.status(500).send("DB error"); }
 });
-
 app.get("/api/assigns/by-process/:id_process", async (req, res) => {
   try {
     const id = toInt(req.params.id_process);
     if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id_process" });
     const lim = Math.min(toInt(req.query.limit) || 500, 2000);
     const rows = await q(
-      `SELECT * FROM assign WHERE id_process = $1 ORDER BY id_assign DESC LIMIT ${lim}`,
-      [id]
+      `SELECT * FROM assign WHERE id_process = $1 ORDER BY id_assign DESC LIMIT ${lim}`, [id]
     );
     res.json(rows);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("DB error");
-  }
+  } catch { res.status(500).send("DB error"); }
 });
 
-// View join đầy đủ (rất tiện cho app)
+// View join đầy đủ
 app.get("/api/assigns/full", async (req, res) => {
   try {
     const lim = Math.min(toInt(req.query.limit) || 200, 1000);
@@ -273,37 +214,25 @@ app.get("/api/assigns/full", async (req, res) => {
       `
     );
     res.json(rows);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("DB error");
-  }
+  } catch { res.status(500).send("DB error"); }
 });
 
-// Insert assign (CÓ Number_of_devices + Number_of_process + unit)
+// ========== INSERT assign (thêm 3 cột mới + auto id_note) ==========
 app.post("/api/assigns", async (req, res) => {
   try {
-    const {
-      id_user,
-      id_project,
-      id_process,
-      id_task,
-      time_in,
-      time_out,
-      project_status,
-      work_status,
-      report_status,
-      daily_status,
-      time_work,
-      Number_of_devices,   // optional int
-      Number_of_process,   // optional int
-      unit,                // optional varchar(100)
-    } = req.body || {};
-
-    // validate số bắt buộc
-    const needInt = { id_user, id_project, id_process, id_task };
+    const b = req.body || {};
+    const needInt = { id_user: b.id_user, id_project: b.id_project, id_process: b.id_process, id_task: b.id_task };
     for (const [k, v] of Object.entries(needInt)) {
       if (v === undefined || v === null || Number.isNaN(toInt(v)))
         return res.status(400).json({ error: `Missing/invalid number field: ${k}` });
+    }
+
+    const corrective = normText(b.corrective_maintenance, 100);
+    const otherWork  = normText(b.other_work, 100);
+
+    let id_note = Number.isFinite(Number(b.id_note)) ? toInt(b.id_note) : null;
+    if (!id_note && (hasText(corrective) || hasText(otherWork))) {
+      id_note = await nextNoteId();
     }
 
     const rows = await q(
@@ -312,25 +241,30 @@ app.post("/api/assigns", async (req, res) => {
         (id_user, id_project, id_process, id_task,
          time_in, time_out, project_status, work_status,
          report_status, daily_status, time_work,
-         "Number_of_devices", "Number_of_process", unit)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         "Number_of_devices", "Number_of_process", unit,
+         id_working_process, corrective_maintenance, other_work, id_note)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
       RETURNING *;
       `,
       [
-        toInt(id_user),
-        toInt(id_project),
-        toInt(id_process),
-        toInt(id_task),
-        normText(time_in, 100),
-        normText(time_out, 100),
-        normText(project_status, 100),
-        normText(work_status, 100),
-        normText(report_status, 100),
-        normText(daily_status, 100),
-        normText(time_work, 100),
-        Number.isFinite(Number(Number_of_devices)) ? toInt(Number_of_devices) : null,
-        Number.isFinite(Number(Number_of_process)) ? toInt(Number_of_process) : null,
-        normText(unit, 100),
+        toInt(b.id_user),
+        toInt(b.id_project),
+        toInt(b.id_process),
+        toInt(b.id_task),
+        normText(b.time_in, 100),
+        normText(b.time_out, 100),
+        normText(b.project_status, 100),
+        normText(b.work_status, 100),
+        normText(b.report_status, 100),
+        normText(b.daily_status, 100),
+        normText(b.time_work, 100),
+        Number.isFinite(Number(b.Number_of_devices)) ? toInt(b.Number_of_devices) : null,
+        Number.isFinite(Number(b.Number_of_process)) ? toInt(b.Number_of_process) : null,
+        normText(b.unit, 100),
+        b.id_working_process != null ? toInt(b.id_working_process) : null,
+        corrective,
+        otherWork,
+        id_note,
       ]
     );
     res.status(201).json(rows[0]);
@@ -340,7 +274,7 @@ app.post("/api/assigns", async (req, res) => {
   }
 });
 
-// Update nhiều trường (partial) – CÓ Number_of_devices + Number_of_process + unit
+// ========== UPDATE assign (partial + auto id_note nếu cần) ==========
 app.put("/api/assigns/:id_assign", async (req, res) => {
   try {
     const id = toInt(req.params.id_assign);
@@ -362,12 +296,18 @@ app.put("/api/assigns/:id_assign", async (req, res) => {
       "Number_of_devices":
         b.Number_of_devices != null && Number.isFinite(Number(b.Number_of_devices))
           ? toInt(b.Number_of_devices)
-          : (b.Number_of_devices != null ? null : undefined), // nếu gửi null/invalid -> set NULL
+          : (b.Number_of_devices != null ? null : undefined),
       "Number_of_process":
         b.Number_of_process != null && Number.isFinite(Number(b.Number_of_process))
           ? toInt(b.Number_of_process)
           : (b.Number_of_process != null ? null : undefined),
-      unit:           b.unit != null ? normText(b.unit, 100) : undefined,
+      unit:                   b.unit != null ? normText(b.unit, 100) : undefined,
+      id_working_process:     b.id_working_process != null ? toInt(b.id_working_process) : undefined,
+      corrective_maintenance: b.corrective_maintenance !== undefined ? normText(b.corrective_maintenance, 100) : undefined,
+      other_work:             b.other_work !== undefined ? normText(b.other_work, 100) : undefined,
+      id_note:                b.id_note !== undefined
+                               ? (Number.isFinite(Number(b.id_note)) ? toInt(b.id_note) : null)
+                               : undefined,
     };
 
     const sets = [];
@@ -375,18 +315,30 @@ app.put("/api/assigns/:id_assign", async (req, res) => {
     for (const [col, val] of Object.entries(payload)) {
       if (val !== undefined && !(Number.isNaN(val) && /^id_/.test(col))) {
         params.push(val);
-        sets.push(`"${col}" = $${params.length}`); // quote để an toàn cho cột PascalCase
+        sets.push(`"${col}" = $${params.length}`);
       }
     }
     if (!sets.length) return res.status(400).json({ error: "No valid fields" });
 
     params.push(id);
-    const rows = await q(
+    let rows = await q(
       `UPDATE assign SET ${sets.join(", ")} WHERE id_assign = $${params.length} RETURNING *`,
       params
     );
     if (!rows.length) return res.status(404).json({ error: "Not found" });
-    res.json(rows[0]);
+
+    // Auto-assign id_note nếu sau update chưa có mà đã có corrective/other
+    let row = rows[0];
+    if ((hasText(row.corrective_maintenance) || hasText(row.other_work)) && (row.id_note == null)) {
+      const newIdNote = await nextNoteId();
+      rows = await q(
+        `UPDATE assign SET id_note = $1 WHERE id_assign = $2 RETURNING *`,
+        [newIdNote, id]
+      );
+      row = rows[0];
+    }
+
+    res.json(row);
   } catch (e) {
     console.error("PUT /api/assigns/:id_assign", e);
     res.status(500).send("DB error");
@@ -399,42 +351,29 @@ app.post("/api/assigns/:id_assign/checkin", async (req, res) => {
     const id = toInt(req.params.id_assign);
     if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id_assign" });
     const now = new Date().toISOString();
-    const rows = await q(
-      `UPDATE assign SET time_in=$1 WHERE id_assign=$2 RETURNING *`,
-      [now, id]
-    );
+    const rows = await q(`UPDATE assign SET time_in=$1 WHERE id_assign=$2 RETURNING *`, [now, id]);
     if (!rows.length) return res.status(404).json({ error: "Not found" });
     res.json(rows[0]);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("DB error");
-  }
+  } catch { res.status(500).send("DB error"); }
 });
-
 app.post("/api/assigns/:id_assign/checkout", async (req, res) => {
   try {
     const id = toInt(req.params.id_assign);
     if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id_assign" });
     const now = new Date().toISOString();
-    const rows = await q(
-      `UPDATE assign SET time_out=$1 WHERE id_assign=$2 RETURNING *`,
-      [now, id]
-    );
+    const rows = await q(`UPDATE assign SET time_out=$1 WHERE id_assign=$2 RETURNING *`, [now, id]);
     if (!rows.length) return res.status(404).json({ error: "Not found" });
     res.json(rows[0]);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("DB error");
-  }
+  } catch { res.status(500).send("DB error"); }
 });
 
 // ====================== FILTER STATUS ======================
 function buildStatusQuery(field) {
   return async (req, res) => {
     try {
-      const status = req.params.status; // 'anything' hoặc có %...%
+      const status = req.params.status;
       const lim = Math.min(toInt(req.query.limit) || 500, 2000);
-      const valuesParam = req.query.values; // "a,b,c"
+      const valuesParam = req.query.values;
       const params = [];
       let where = "";
 
@@ -443,10 +382,7 @@ function buildStatusQuery(field) {
         params.push(v);
         where = `WHERE ${field} ILIKE $1`;
       } else if (valuesParam) {
-        const arr = String(valuesParam)
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
+        const arr = String(valuesParam).split(",").map((s) => s.trim()).filter(Boolean);
         if (arr.length) {
           const ph = arr.map((_, i) => `$${i + 1}`).join(",");
           where = `WHERE ${field} ILIKE ANY(ARRAY[${ph}])`;
