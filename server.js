@@ -8,7 +8,6 @@ const { Pool } = pkg;
 const app = express();
 
 /* ================== CONFIG ================== */
-// Dùng env khi deploy (khuyến nghị)
 const DB_HOST = process.env.PGHOST     || "raitek.cloud";
 const DB_PORT = Number(process.env.PGPORT || 5432);
 const DB_USER = process.env.PGUSER     || "mtryha11";
@@ -33,44 +32,45 @@ pool.on("connect", (client) => {
   client.query('SET search_path TO "Project", public');
 });
 
-async function q(sql, params = []) {
-  const r = await pool.query(sql, params);
-  return r.rows;
-}
+async function q(sql, params = []) { const r = await pool.query(sql, params); return r.rows; }
 
 /* ============ UTILS / VALIDATION ============ */
-const toInt = (v) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.trunc(n) : NaN;
-};
-const normText = (s, max = 255) =>
-  s == null ? null : String(s).trim().slice(0, max);
-const hasText = (s) => s != null && String(s).trim() !== "";
-const likeify = (s) => (s == null ? null : (String(s).includes("%") ? String(s) : `%${String(s)}%`));
+const toInt = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.trunc(n) : NaN; };
+const normText = (s, max = 255) => (s == null ? null : String(s).trim().slice(0, max));
+const hasText  = (s) => s != null && String(s).trim() !== "";
+const likeify  = (s) => (s == null ? null : (String(s).includes("%") ? String(s) : `%${String(s)}%`));
 
 function sendDbErr(res, where, e) {
   console.error(where, e?.message || e);
   return res.status(500).json({ error: "DB error", message: e?.message || String(e) });
 }
 
+/* ===== helpers: id_process theo tên ===== */
+async function getProcessIdByName(name) {
+  const r = await q(`SELECT id_process FROM process WHERE process=$1 LIMIT 1`, [name]);
+  return r?.[0]?.id_process ?? null;
+}
+async function getProcessIds() {
+  const pm    = await getProcessIdByName("Bảo dưỡng phòng ngừa");
+  const corr  = await getProcessIdByName("Bảo dưỡng khắc phục");
+  const other = await getProcessIdByName("Công việc khác");
+  return { PM: pm ?? 80001, CORR: corr ?? 80002, OTHER: other ?? 80003 };
+}
+
 /* ================ HEALTH ================= */
-app.get("/health", (_req, res) => {
-  res.status(200).json({ ok: true, ts: new Date().toISOString() });
-});
+app.get("/health", (_req, res) => res.status(200).json({ ok: true, ts: new Date().toISOString() }));
 app.get("/", (_req, res) => res.send("Backend API is running..."));
 
 /* ================ ACCOUNTS ================ */
 app.get("/api/accounts", async (_req, res) => {
-  try {
-    const rows = await q(`SELECT * FROM account ORDER BY id_user LIMIT 200`);
-    res.json(rows);
-  } catch (e) { sendDbErr(res, "GET /api/accounts", e); }
+  try { res.json(await q(`SELECT * FROM account ORDER BY id_user LIMIT 200`)); }
+  catch (e) { sendDbErr(res, "GET /api/accounts", e); }
 });
 app.get("/api/accounts/:id_user", async (req, res) => {
   try {
     const id = toInt(req.params.id_user);
     if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id_user" });
-    const rows = await q(`SELECT * FROM account WHERE id_user = $1`, [id]);
+    const rows = await q(`SELECT * FROM account WHERE id_user=$1`, [id]);
     if (!rows.length) return res.status(404).json({ error: "Not found" });
     res.json(rows[0]);
   } catch (e) { sendDbErr(res, "GET /api/accounts/:id", e); }
@@ -78,16 +78,14 @@ app.get("/api/accounts/:id_user", async (req, res) => {
 
 /* ================ PROJECTS ================ */
 app.get("/api/projects", async (_req, res) => {
-  try {
-    const rows = await q(`SELECT * FROM project ORDER BY id_project LIMIT 200`);
-    res.json(rows);
-  } catch (e) { sendDbErr(res, "GET /api/projects", e); }
+  try { res.json(await q(`SELECT * FROM project ORDER BY id_project LIMIT 200`)); }
+  catch (e) { sendDbErr(res, "GET /api/projects", e); }
 });
 app.get("/api/projects/:id_project", async (req, res) => {
   try {
     const id = toInt(req.params.id_project);
     if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id_project" });
-    const rows = await q(`SELECT * FROM project WHERE id_project = $1`, [id]);
+    const rows = await q(`SELECT * FROM project WHERE id_project=$1`, [id]);
     if (!rows.length) return res.status(404).json({ error: "Not found" });
     res.json(rows[0]);
   } catch (e) { sendDbErr(res, "GET /api/projects/:id", e); }
@@ -95,16 +93,14 @@ app.get("/api/projects/:id_project", async (req, res) => {
 
 /* ================= TASKS ================== */
 app.get("/api/tasks", async (_req, res) => {
-  try {
-    const rows = await q(`SELECT * FROM task ORDER BY id_task LIMIT 500`);
-    res.json(rows);
-  } catch (e) { sendDbErr(res, "GET /api/tasks", e); }
+  try { res.json(await q(`SELECT * FROM task ORDER BY id_task LIMIT 500`)); }
+  catch (e) { sendDbErr(res, "GET /api/tasks", e); }
 });
 app.get("/api/tasks/:id_task", async (req, res) => {
   try {
     const id = toInt(req.params.id_task);
     if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id_task" });
-    const rows = await q(`SELECT * FROM task WHERE id_task = $1`, [id]);
+    const rows = await q(`SELECT * FROM task WHERE id_task=$1`, [id]);
     if (!rows.length) return res.status(404).json({ error: "Not found" });
     res.json(rows[0]);
   } catch (e) { sendDbErr(res, "GET /api/tasks/:id", e); }
@@ -112,34 +108,30 @@ app.get("/api/tasks/:id_task", async (req, res) => {
 
 /* =============== PROCESSES ================ */
 app.get("/api/processes", async (_req, res) => {
-  try {
-    const rows = await q(`SELECT * FROM process ORDER BY id_process LIMIT 100`);
-    res.json(rows);
-  } catch (e) { sendDbErr(res, "GET /api/processes", e); }
+  try { res.json(await q(`SELECT * FROM process ORDER BY id_process LIMIT 100`)); }
+  catch (e) { sendDbErr(res, "GET /api/processes", e); }
 });
 app.get("/api/processes/:id_process", async (req, res) => {
   try {
     const id = toInt(req.params.id_process);
     if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id_process" });
-    const rows = await q(`SELECT * FROM process WHERE id_process = $1`, [id]);
+    const rows = await q(`SELECT * FROM process WHERE id_process=$1`, [id]);
     if (!rows.length) return res.status(404).json({ error: "Not found" });
     res.json(rows[0]);
   } catch (e) { sendDbErr(res, "GET /api/processes/:id", e); }
 });
 
 /* ========= WORKING PROCESSES (WP) ========= */
-// Table: working_process(id_working_process, working_process_name)
+// working_process(id_working_process, working_process_name)
 app.get("/api/working-processes", async (_req, res) => {
-  try {
-    const rows = await q(`SELECT * FROM working_process ORDER BY id_working_process LIMIT 200`);
-    res.json(rows);
-  } catch (e) { sendDbErr(res, "GET /api/working-processes", e); }
+  try { res.json(await q(`SELECT * FROM working_process ORDER BY id_working_process LIMIT 200`)); }
+  catch (e) { sendDbErr(res, "GET /api/working-processes", e); }
 });
 app.get("/api/working-processes/:id_working_process", async (req, res) => {
   try {
     const id = toInt(req.params.id_working_process);
     if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id_working_process" });
-    const rows = await q(`SELECT * FROM working_process WHERE id_working_process = $1`, [id]);
+    const rows = await q(`SELECT * FROM working_process WHERE id_working_process=$1`, [id]);
     if (!rows.length) return res.status(404).json({ error: "Not found" });
     res.json(rows[0]);
   } catch (e) { sendDbErr(res, "GET /api/working-processes/:id", e); }
@@ -149,18 +141,15 @@ app.post("/api/working-processes", async (req, res) => {
     const b = req.body || {};
     const name = normText(b.working_process_name ?? b.name, 200);
     if (!hasText(name)) return res.status(400).json({ error: "Missing working_process_name" });
-
     let rows;
     if (b.id_working_process != null && !Number.isNaN(toInt(b.id_working_process))) {
       rows = await q(
-        `INSERT INTO working_process (id_working_process, working_process_name)
-         VALUES ($1,$2) RETURNING *`,
+        `INSERT INTO working_process (id_working_process, working_process_name) VALUES ($1,$2) RETURNING *`,
         [toInt(b.id_working_process), name]
       );
     } else {
       rows = await q(
-        `INSERT INTO working_process (working_process_name)
-         VALUES ($1) RETURNING *`,
+        `INSERT INTO working_process (working_process_name) VALUES ($1) RETURNING *`,
         [name]
       );
     }
@@ -172,9 +161,8 @@ app.put("/api/working-processes/:id_working_process", async (req, res) => {
     const id = toInt(req.params.id_working_process);
     if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id_working_process" });
     const name = req.body?.working_process_name ?? req.body?.name;
-    const val = name !== undefined ? normText(name, 200) : undefined;
+    const val  = name !== undefined ? normText(name, 200) : undefined;
     if (val === undefined) return res.status(400).json({ error: "No valid fields" });
-
     const rows = await q(
       `UPDATE working_process SET working_process_name=$1 WHERE id_working_process=$2 RETURNING *`,
       [val, id]
@@ -185,17 +173,12 @@ app.put("/api/working-processes/:id_working_process", async (req, res) => {
 });
 
 /* ================= ASSIGNS ================= */
-// Helper: cấp id_note tự động nếu có corrective/other mà chưa có id_note
-async function nextNoteId() {
-  const r = await q(`SELECT COALESCE(MAX(id_note), 90100) + 1 AS next FROM assign WHERE id_note >= 90101`);
-  return r?.[0]?.next ?? 90101;
-}
 
 // List / detail
 app.get("/api/assigns", async (req, res) => {
   try {
     const limit = Math.min(toInt(req.query.limit) || 200, 2000);
-    const rows = await q(`SELECT * FROM assign ORDER BY id_assign DESC LIMIT ${limit}`);
+    const rows  = await q(`SELECT * FROM assign ORDER BY id_assign DESC LIMIT ${limit}`);
     res.json(rows);
   } catch (e) { sendDbErr(res, "GET /api/assigns", e); }
 });
@@ -203,7 +186,7 @@ app.get("/api/assigns/:id_assign", async (req, res) => {
   try {
     const id = toInt(req.params.id_assign);
     if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id_assign" });
-    const rows = await q(`SELECT * FROM assign WHERE id_assign = $1`, [id]);
+    const rows = await q(`SELECT * FROM assign WHERE id_assign=$1`, [id]);
     if (!rows.length) return res.status(404).json({ error: "Not found" });
     res.json(rows[0]);
   } catch (e) { sendDbErr(res, "GET /api/assigns/:id", e); }
@@ -216,21 +199,18 @@ function listAssignBy(col) {
       const id = toInt(req.params.id);
       if (Number.isNaN(id)) return res.status(400).json({ error: `Invalid ${col}` });
       const lim = Math.min(toInt(req.query.limit) || 500, 2000);
-      const rows = await q(
-        `SELECT * FROM assign WHERE ${col} = $1 ORDER BY id_assign DESC LIMIT ${lim}`,
-        [id]
-      );
+      const rows = await q(`SELECT * FROM assign WHERE ${col}=$1 ORDER BY id_assign DESC LIMIT ${lim}`, [id]);
       res.json(rows);
     } catch (e) { sendDbErr(res, `GET /api/assigns/by-${col}/:id`, e); }
   };
 }
-app.get("/api/assigns/by-project/:id",        listAssignBy("id_project"));
-app.get("/api/assigns/by-user/:id",           listAssignBy("id_user"));
-app.get("/api/assigns/by-task/:id",           listAssignBy("id_task"));
-app.get("/api/assigns/by-process/:id",        listAssignBy("id_process"));
-app.get("/api/assigns/by-working-process/:id",listAssignBy("id_working_process"));
+app.get("/api/assigns/by-project/:id",         listAssignBy("id_project"));
+app.get("/api/assigns/by-user/:id",            listAssignBy("id_user"));
+app.get("/api/assigns/by-task/:id",            listAssignBy("id_task"));
+app.get("/api/assigns/by-process/:id",         listAssignBy("id_process"));
+app.get("/api/assigns/by-working-process/:id", listAssignBy("id_working_process"));
 
-// Full join
+// Full join (kéo cả working_process_name)
 app.get("/api/assigns/full", async (req, res) => {
   try {
     const lim = Math.min(toInt(req.query.limit) || 200, 1000);
@@ -243,10 +223,10 @@ app.get("/api/assigns/full", async (req, res) => {
              pr.process              AS process_name,
              wp.working_process_name AS working_process_name
       FROM assign a
-      LEFT JOIN account         u  ON u.id_user            = a.id_user
-      LEFT JOIN project         p  ON p.id_project         = a.id_project
-      LEFT JOIN task            t  ON t.id_task            = a.id_task
-      LEFT JOIN process         pr ON pr.id_process        = a.id_process
+      LEFT JOIN account         u  ON u.id_user             = a.id_user
+      LEFT JOIN project         p  ON p.id_project          = a.id_project
+      LEFT JOIN task            t  ON t.id_task             = a.id_task
+      LEFT JOIN process         pr ON pr.id_process         = a.id_process
       LEFT JOIN working_process wp ON wp.id_working_process = a.id_working_process
       ORDER BY a.id_assign DESC
       LIMIT ${lim}
@@ -256,35 +236,53 @@ app.get("/api/assigns/full", async (req, res) => {
   } catch (e) { sendDbErr(res, "GET /api/assigns/full", e); }
 });
 
-// INSERT assign (chỉ dùng id_working_process; KHÔNG còn Number_of_process)
+/* ===== POST: create assign =====
+   - Tự suy ra id_process theo loại công việc
+   - PM: id_task bắt buộc (từ bảng task)
+   - Corrective: nếu có id_task thì >= 91001
+   - Other     : nếu có id_task thì >= 92001
+   - BỎ id_note; dùng message (varchar 100)
+*/
 app.post("/api/assigns", async (req, res) => {
   try {
     const b = req.body || {};
-    const needInt = {
-      id_user: b.id_user,
-      id_project: b.id_project,
-      id_process: b.id_process,
-      id_task: b.id_task,
-    };
+    const { PM, CORR, OTHER } = await getProcessIds();
+
+    const corrective = normText(b.corrective_maintenance, 100);
+    const otherWork  = normText(b.other_work, 100);
+    const message    = normText(b.message, 100);
+
+    // quyết định id_process
+    let id_process = Number.isFinite(Number(b.id_process)) ? toInt(b.id_process) : null;
+    if (hasText(corrective)) id_process = CORR;
+    else if (hasText(otherWork)) id_process = OTHER;
+    else if (!id_process) id_process = PM;
+
+    // bắt buộc
+    const needInt = { id_user: b.id_user, id_project: b.id_project, id_process };
     for (const [k, v] of Object.entries(needInt)) {
-      if (v === undefined || v === null || Number.isNaN(toInt(v)))
+      if (v === undefined || v === null || Number.isNaN(toInt(v))) {
         return res.status(400).json({ error: `Missing/invalid number field: ${k}` });
+      }
     }
 
-    // Chuẩn hoá working process (chấp nhận alias Number_of_process nhưng chỉ lưu vào id_working_process)
+    let id_task = Number.isFinite(Number(b.id_task)) ? toInt(b.id_task) : null;
+    if (id_process === PM && !Number.isFinite(Number(id_task))) {
+      return res.status(400).json({ error: "PM requires a valid id_task" });
+    }
+    if (id_process === CORR && id_task != null && id_task < 91001) {
+      return res.status(400).json({ error: "Corrective id_task must be >= 91001" });
+    }
+    if (id_process === OTHER && id_task != null && id_task < 92001) {
+      return res.status(400).json({ error: "Other-work id_task must be >= 92001" });
+    }
+
+    // working process (chấp nhận alias Number_of_process)
     const wp = (b.id_working_process != null && !Number.isNaN(toInt(b.id_working_process)))
       ? toInt(b.id_working_process)
       : (b.Number_of_process != null && !Number.isNaN(toInt(b.Number_of_process))
           ? toInt(b.Number_of_process)
           : null);
-
-    const corrective = normText(b.corrective_maintenance, 100);
-    const otherWork  = normText(b.other_work, 100);
-
-    let id_note = Number.isFinite(Number(b.id_note)) ? toInt(b.id_note) : null;
-    if (!id_note && (hasText(corrective) || hasText(otherWork))) {
-      id_note = await nextNoteId();
-    }
 
     const rows = await q(
       `
@@ -293,15 +291,15 @@ app.post("/api/assigns", async (req, res) => {
          time_in, time_out, project_status, work_status,
          report_status, daily_status, time_work,
          "Number_of_devices", unit,
-         id_working_process, corrective_maintenance, other_work, id_note)
+         id_working_process, corrective_maintenance, other_work, message)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
       RETURNING *;
       `,
       [
         toInt(b.id_user),
         toInt(b.id_project),
-        toInt(b.id_process),
-        toInt(b.id_task),
+        id_process,
+        id_task,
         normText(b.time_in, 100),
         normText(b.time_out, 100),
         normText(b.project_status, 100),
@@ -314,28 +312,39 @@ app.post("/api/assigns", async (req, res) => {
         wp,
         corrective,
         otherWork,
-        id_note,
+        message,
       ]
     );
+
     res.status(201).json(rows[0]);
   } catch (e) { sendDbErr(res, "POST /api/assigns", e); }
 });
 
-// UPDATE assign (chỉ cập nhật id_working_process; bỏ Number_of_process)
+/* ===== PUT: update assign =====
+   - Tự tính id_process theo corrective/other nếu có
+   - BỎ id_note; cho phép cập nhật message
+*/
 app.put("/api/assigns/:id_assign", async (req, res) => {
   try {
     const id = toInt(req.params.id_assign);
     if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id_assign" });
 
+    const curRows = await q(`SELECT * FROM assign WHERE id_assign=$1`, [id]);
+    if (!curRows.length) return res.status(404).json({ error: "Not found" });
+    const cur = curRows[0];
+
     const b = req.body || {};
+    const { PM, CORR, OTHER } = await getProcessIds();
+
+    // chuẩn hoá
     const wp =
       (b.id_working_process != null && !Number.isNaN(toInt(b.id_working_process)))
         ? toInt(b.id_working_process)
         : (b.Number_of_process != null && !Number.isNaN(toInt(b.Number_of_process))
             ? toInt(b.Number_of_process)
-            : undefined); // undefined => không update
+            : undefined);
 
-    const payload = {
+    const patch = {
       id_user:        b.id_user != null ? toInt(b.id_user) : undefined,
       id_project:     b.id_project != null ? toInt(b.id_project) : undefined,
       id_task:        b.id_task != null ? toInt(b.id_task) : undefined,
@@ -352,40 +361,52 @@ app.put("/api/assigns/:id_assign", async (req, res) => {
           ? toInt(b.Number_of_devices)
           : (b.Number_of_devices != null ? null : undefined),
       unit:                   b.unit != null ? normText(b.unit, 100) : undefined,
-      id_working_process:     wp !== undefined ? wp : undefined,
+      id_working_process:     wp,
       corrective_maintenance: b.corrective_maintenance !== undefined ? normText(b.corrective_maintenance, 100) : undefined,
       other_work:             b.other_work !== undefined ? normText(b.other_work, 100) : undefined,
-      id_note:                b.id_note !== undefined
-                               ? (Number.isFinite(Number(b.id_note)) ? toInt(b.id_note) : null)
-                               : undefined,
+      message:                b.message !== undefined ? normText(b.message, 100) : undefined,
     };
 
+    // snapshot sau update
+    const next = { ...cur, ...Object.fromEntries(Object.entries(patch).filter(([,v]) => v !== undefined)) };
+
+    // quyết định id_process theo nội dung
+    let targetProcess = next.id_process;
+    if (hasText(next.corrective_maintenance)) targetProcess = CORR;
+    else if (hasText(next.other_work))        targetProcess = OTHER;
+    else if (!targetProcess)                  targetProcess = PM;
+
+    // rule id_task theo loại
+    if (targetProcess === PM && (next.id_task == null || Number.isNaN(toInt(next.id_task)))) {
+      return res.status(400).json({ error: "PM requires a valid id_task" });
+    }
+    if (targetProcess === CORR && next.id_task != null && toInt(next.id_task) < 91001) {
+      return res.status(400).json({ error: "Corrective id_task must be >= 91001" });
+    }
+    if (targetProcess === OTHER && next.id_task != null && toInt(next.id_task) < 92001) {
+      return res.status(400).json({ error: "Other-work id_task must be >= 92001" });
+    }
+
+    // UPDATE
     const sets = [];
     const params = [];
-    for (const [col, val] of Object.entries(payload)) {
+    for (const [col, val] of Object.entries(patch)) {
       if (val !== undefined && !(Number.isNaN(val) && /^id_/.test(col))) {
         params.push(val);
         sets.push(`"${col}" = $${params.length}`);
       }
     }
-    if (!sets.length) return res.status(400).json({ error: "No valid fields" });
+    // luôn cập nhật id_process theo quyết định cuối
+    params.push(targetProcess);
+    sets.push(`"id_process" = $${params.length}`);
 
     params.push(id);
-    let rows = await q(
-      `UPDATE assign SET ${sets.join(", ")} WHERE id_assign = $${params.length} RETURNING *`,
+    const rows = await q(
+      `UPDATE assign SET ${sets.join(", ")} WHERE id_assign=$${params.length} RETURNING *`,
       params
     );
     if (!rows.length) return res.status(404).json({ error: "Not found" });
-
-    // Auto-add id_note nếu thiếu mà có nội dung
-    let row = rows[0];
-    if ((hasText(row.corrective_maintenance) || hasText(row.other_work)) && (row.id_note == null)) {
-      const newIdNote = await nextNoteId();
-      rows = await q(`UPDATE assign SET id_note = $1 WHERE id_assign = $2 RETURNING *`, [newIdNote, id]);
-      row = rows[0];
-    }
-
-    res.json(row);
+    res.json(rows[0]);
   } catch (e) { sendDbErr(res, "PUT /api/assigns/:id_assign", e); }
 });
 
@@ -445,6 +466,4 @@ app.get("/api/assign/by-daily-status/:status",   buildStatusQuery("daily_status"
 
 /* ================ START ================= */
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`✅ API running at http://localhost:${PORT}`);
-});
+app.listen(PORT, () => console.log(`✅ API running at http://localhost:${PORT}`));
