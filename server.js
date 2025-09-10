@@ -237,11 +237,9 @@ app.get("/api/assigns/full", async (req, res) => {
 });
 
 /* ===== POST: create assign =====
-   - Tự suy ra id_process theo loại công việc
-   - PM: id_task bắt buộc (từ bảng task)
-   - Corrective: nếu có id_task thì >= 91001
-   - Other     : nếu có id_task thì >= 92001
-   - BỎ id_note; dùng message (varchar 100)
+   - Tự suy ra id_process theo loại công việc (ưu tiên corrective/other)
+   - id_task có thể NULL (PM không pick thì để NULL)
+   - Khắc phục/Khác: nếu client không gửi id_note, tự set 91001 / 92001
 */
 app.post("/api/assigns", async (req, res) => {
   try {
@@ -258,7 +256,7 @@ app.post("/api/assigns", async (req, res) => {
     else if (hasText(otherWork)) id_process = OTHER;
     else if (!id_process) id_process = PM;
 
-    // bắt buộc
+    // bắt buộc: id_user, id_project, id_process
     const needInt = { id_user: b.id_user, id_project: b.id_project, id_process };
     for (const [k, v] of Object.entries(needInt)) {
       if (v === undefined || v === null || Number.isNaN(toInt(v))) {
@@ -266,15 +264,17 @@ app.post("/api/assigns", async (req, res) => {
       }
     }
 
+    // id_task: có thể NULL (FK cho phép null)
     let id_task = Number.isFinite(Number(b.id_task)) ? toInt(b.id_task) : null;
-    if (id_process === PM && !Number.isFinite(Number(id_task))) {
-      return res.status(400).json({ error: "PM requires a valid id_task" });
-    }
-    if (id_process === CORR && id_task != null && id_task < 91001) {
-      return res.status(400).json({ error: "Corrective id_task must be >= 91001" });
-    }
-    if (id_process === OTHER && id_task != null && id_task < 92001) {
-      return res.status(400).json({ error: "Other-work id_task must be >= 92001" });
+
+    // id_note: nếu không gửi, tự gán theo loại
+    let id_note = (b.id_note != null && Number.isFinite(Number(b.id_note)))
+      ? toInt(b.id_note)
+      : null;
+    if (id_note == null) {
+      if (hasText(corrective)) id_note = 91001;
+      else if (hasText(otherWork)) id_note = 92001;
+      else id_note = null; // PM
     }
 
     // working process (chấp nhận alias Number_of_process)
@@ -287,12 +287,12 @@ app.post("/api/assigns", async (req, res) => {
     const rows = await q(
       `
       INSERT INTO assign
-        (id_user, id_project, id_process, id_task,
+        (id_user, id_project, id_process, id_task, id_note,
          time_in, time_out, project_status, work_status,
          report_status, daily_status, time_work,
          "Number_of_devices", unit,
          id_working_process, corrective_maintenance, other_work, message)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
       RETURNING *;
       `,
       [
@@ -300,6 +300,7 @@ app.post("/api/assigns", async (req, res) => {
         toInt(b.id_project),
         id_process,
         id_task,
+        id_note,
         normText(b.time_in, 100),
         normText(b.time_out, 100),
         normText(b.project_status, 100),
@@ -322,7 +323,7 @@ app.post("/api/assigns", async (req, res) => {
 
 /* ===== PUT: update assign =====
    - Tự tính id_process theo corrective/other nếu có
-   - BỎ id_note; cho phép cập nhật message
+   - Cho phép cập nhật id_note; nếu không gửi mà loại = Khắc phục/Khác → tự set 91001/92001; PM → null
 */
 app.put("/api/assigns/:id_assign", async (req, res) => {
   try {
@@ -344,10 +345,12 @@ app.put("/api/assigns/:id_assign", async (req, res) => {
             ? toInt(b.Number_of_process)
             : undefined);
 
+    // Lưu ý: id_task cho phép null → nếu client muốn xóa, gửi null
     const patch = {
       id_user:        b.id_user != null ? toInt(b.id_user) : undefined,
       id_project:     b.id_project != null ? toInt(b.id_project) : undefined,
-      id_task:        b.id_task != null ? toInt(b.id_task) : undefined,
+      id_task:        b.hasOwnProperty("id_task") ? (b.id_task === null ? null : toInt(b.id_task)) : undefined,
+      id_note:        b.hasOwnProperty("id_note") ? (b.id_note === null ? null : toInt(b.id_note)) : undefined,
       id_process:     b.id_process != null ? toInt(b.id_process) : undefined,
       time_in:        b.time_in != null ? normText(b.time_in ?? b.checkin_time, 100) : undefined,
       time_out:       b.time_out != null ? normText(b.time_out ?? b.checkout_time, 100) : undefined,
@@ -376,18 +379,18 @@ app.put("/api/assigns/:id_assign", async (req, res) => {
     else if (hasText(next.other_work))        targetProcess = OTHER;
     else if (!targetProcess)                  targetProcess = PM;
 
-    // rule id_task theo loại
-    if (targetProcess === PM && (next.id_task == null || Number.isNaN(toInt(next.id_task)))) {
-      return res.status(400).json({ error: "PM requires a valid id_task" });
-    }
-    if (targetProcess === CORR && next.id_task != null && toInt(next.id_task) < 91001) {
-      return res.status(400).json({ error: "Corrective id_task must be >= 91001" });
-    }
-    if (targetProcess === OTHER && next.id_task != null && toInt(next.id_task) < 92001) {
-      return res.status(400).json({ error: "Other-work id_task must be >= 92001" });
+    // Auto id_note nếu client không gửi
+    if (patch.id_note === undefined) {
+      if (targetProcess === CORR) {
+        patch.id_note = next.id_note ?? 91001;
+      } else if (targetProcess === OTHER) {
+        patch.id_note = next.id_note ?? 92001;
+      } else {
+        patch.id_note = null; // PM
+      }
     }
 
-    // UPDATE
+    // Build UPDATE
     const sets = [];
     const params = [];
     for (const [col, val] of Object.entries(patch)) {
