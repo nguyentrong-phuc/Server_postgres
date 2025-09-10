@@ -57,6 +57,13 @@ async function getProcessIds() {
   return { PM: pm ?? 80001, CORR: corr ?? 80002, OTHER: other ?? 80003 };
 }
 
+/* ===== helper: kiểm tra task có tồn tại không (chống vỡ FK) ===== */
+async function taskExists(id_task) {
+  if (!Number.isFinite(Number(id_task))) return false;
+  const r = await q(`SELECT 1 FROM task WHERE id_task=$1 LIMIT 1`, [Number(id_task)]);
+  return r.length > 0;
+}
+
 /* ================ HEALTH ================= */
 app.get("/health", (_req, res) => res.status(200).json({ ok: true, ts: new Date().toISOString() }));
 app.get("/", (_req, res) => res.send("Backend API is running..."));
@@ -238,8 +245,9 @@ app.get("/api/assigns/full", async (req, res) => {
 
 /* ===== POST: create assign =====
    - Tự suy ra id_process theo loại công việc (ưu tiên corrective/other)
-   - id_task có thể NULL (PM không pick thì để NULL)
-   - Khắc phục/Khác: nếu client không gửi id_note, tự set 91001 / 92001
+   - PM: bắt buộc id_task tồn tại trong task
+   - Khắc phục/Khác: cho phép id_task NULL; nếu client gửi id_task không tồn tại → ép NULL
+   - id_note: nếu không gửi → CORR=91001, OTHER=92001, PM=NULL
 */
 app.post("/api/assigns", async (req, res) => {
   try {
@@ -272,9 +280,23 @@ app.post("/api/assigns", async (req, res) => {
       ? toInt(b.id_note)
       : null;
     if (id_note == null) {
-      if (hasText(corrective)) id_note = 91001;
-      else if (hasText(otherWork)) id_note = 92001;
+      if (id_process === CORR) id_note = 91001;
+      else if (id_process === OTHER) id_note = 92001;
       else id_note = null; // PM
+    }
+
+    // Ràng buộc theo loại
+    if (id_process === PM) {
+      if (!Number.isFinite(Number(id_task))) {
+        return res.status(400).json({ error: "PM requires a valid id_task" });
+      }
+      if (!(await taskExists(id_task))) {
+        return res.status(400).json({ error: `PM id_task ${id_task} not found in task table` });
+      }
+      id_note = null;
+    } else {
+      // CORR/OTHER: nếu client gửi id_task mà không có trong task → ép NULL để không vỡ FK
+      if (id_task != null && !(await taskExists(id_task))) id_task = null;
     }
 
     // working process (chấp nhận alias Number_of_process)
@@ -322,8 +344,9 @@ app.post("/api/assigns", async (req, res) => {
 });
 
 /* ===== PUT: update assign =====
-   - Tự tính id_process theo corrective/other nếu có
-   - Cho phép cập nhật id_note; nếu không gửi mà loại = Khắc phục/Khác → tự set 91001/92001; PM → null
+   - Tự xác định id_process (ưu tiên corrective/other)
+   - PM: yêu cầu id_task tồn tại, và id_note=NULL
+   - CORR/OTHER: nếu id_task không tồn tại → ép NULL; id_note mặc định 91001/92001 nếu không gửi
 */
 app.put("/api/assigns/:id_assign", async (req, res) => {
   try {
@@ -345,7 +368,6 @@ app.put("/api/assigns/:id_assign", async (req, res) => {
             ? toInt(b.Number_of_process)
             : undefined);
 
-    // Lưu ý: id_task cho phép null → nếu client muốn xóa, gửi null
     const patch = {
       id_user:        b.id_user != null ? toInt(b.id_user) : undefined,
       id_project:     b.id_project != null ? toInt(b.id_project) : undefined,
@@ -379,29 +401,48 @@ app.put("/api/assigns/:id_assign", async (req, res) => {
     else if (hasText(next.other_work))        targetProcess = OTHER;
     else if (!targetProcess)                  targetProcess = PM;
 
-    // Auto id_note nếu client không gửi
-    if (patch.id_note === undefined) {
-      if (targetProcess === CORR) {
-        patch.id_note = next.id_note ?? 91001;
-      } else if (targetProcess === OTHER) {
-        patch.id_note = next.id_note ?? 92001;
-      } else {
-        patch.id_note = null; // PM
+    // Tính lại id_task & id_note an toàn
+    let finalTask = next.id_task;
+    let finalNote = next.id_note;
+
+    if (targetProcess === PM) {
+      if (!Number.isFinite(Number(finalTask))) {
+        return res.status(400).json({ error: "PM requires a valid id_task" });
       }
+      if (!(await taskExists(finalTask))) {
+        return res.status(400).json({ error: `PM id_task ${finalTask} not found in task table` });
+      }
+      finalNote = null;
+    } else if (targetProcess === CORR) {
+      if (finalTask != null && !(await taskExists(finalTask))) finalTask = null;
+      if (!Number.isFinite(Number(finalNote))) finalNote = 91001;
+    } else if (targetProcess === OTHER) {
+      if (finalTask != null && !(await taskExists(finalTask))) finalTask = null;
+      if (!Number.isFinite(Number(finalNote))) finalNote = 92001;
     }
 
-    // Build UPDATE
+    // UPDATE
     const sets = [];
     const params = [];
+
+    // build SET từ patch (trừ id_process/id_task/id_note – sẽ ghi đè)
     for (const [col, val] of Object.entries(patch)) {
+      if (["id_process","id_task","id_note"].includes(col)) continue;
       if (val !== undefined && !(Number.isNaN(val) && /^id_/.test(col))) {
         params.push(val);
         sets.push(`"${col}" = $${params.length}`);
       }
     }
-    // luôn cập nhật id_process theo quyết định cuối
+
+    // luôn cập nhật id_process + id_task + id_note theo quyết định cuối
     params.push(targetProcess);
     sets.push(`"id_process" = $${params.length}`);
+
+    params.push(finalTask);
+    sets.push(`"id_task" = $${params.length}`);
+
+    params.push(finalNote);
+    sets.push(`"id_note" = $${params.length}`);
 
     params.push(id);
     const rows = await q(
